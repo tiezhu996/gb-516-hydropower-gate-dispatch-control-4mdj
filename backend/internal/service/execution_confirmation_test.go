@@ -22,15 +22,16 @@ func newExecutionWorkflow(t *testing.T) (ExecutionConfirmationService, Operation
 	}
 	sqlDB, _ := db.DB()
 	sqlDB.SetMaxOpenConns(1)
-	if err := db.AutoMigrate(&model.GateUnit{}, &model.OperationDirective{}, &model.DirectiveApproval{}, &model.ExecutionConfirmation{}, &model.AuditLog{}); err != nil {
+	if err := db.AutoMigrate(&model.GateUnit{}, &model.OperationDirective{}, &model.DirectiveApproval{}, &model.ExecutionConfirmation{}, &model.GateExecutionLock{}, &model.AuditLog{}); err != nil {
 		t.Fatalf("migrate test database: %v", err)
 	}
 	gateRepo := repository.NewGateUnitRepository(db)
 	directiveRepo := repository.NewOperationDirectiveRepository(db)
 	confirmationRepo := repository.NewExecutionConfirmationRepository(db)
+	lockRepo := repository.NewGateExecutionLockRepository(db)
 	security := NewSecurityService(repository.NewSecurityRepository(db), config.Config{})
-	directives := NewOperationDirectiveService(directiveRepo, gateRepo, security)
-	confirmations := NewExecutionConfirmationService(confirmationRepo, directiveRepo, gateRepo, security)
+	directives := NewOperationDirectiveService(directiveRepo, gateRepo, lockRepo, security)
+	confirmations := NewExecutionConfirmationService(confirmationRepo, directiveRepo, gateRepo, lockRepo, security)
 	gate := model.GateUnit{BaseModel: model.BaseModel{Code: "GU-FLOW", Name: "泄洪闸", Status: "closed", Version: 1}, Facility: "主坝", Owner: "运行一组"}
 	if err := gateRepo.Create(context.Background(), &gate); err != nil {
 		t.Fatalf("create gate: %v", err)
@@ -98,8 +99,8 @@ func TestExecutionConfirmationCompletesDirectiveAndGateAtomically(t *testing.T) 
 		t.Fatalf("workflow not completed atomically: confirmation=%s directive=%s gate=%s", confirmed.Status, updatedDirective.Status, updatedGate.Status)
 	}
 	var linkedAudits int64
-	if err := db.Model(&model.AuditLog{}).Where("request_id = ?", "req-confirm").Count(&linkedAudits).Error; err != nil || linkedAudits != 3 {
-		t.Fatalf("expected three linked audit events, count=%d err=%v", linkedAudits, err)
+	if err := db.Model(&model.AuditLog{}).Where("request_id = ?", "req-confirm").Count(&linkedAudits).Error; err != nil || linkedAudits != 4 {
+		t.Fatalf("expected four linked audit events (incl. execution-right release), count=%d err=%v", linkedAudits, err)
 	}
 }
 

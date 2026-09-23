@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/blueship581/hydropower-gate-dispatch-control/backend/internal/config"
+	"github.com/blueship581/hydropower-gate-dispatch-control/backend/internal/constants"
 	"github.com/blueship581/hydropower-gate-dispatch-control/backend/internal/model"
 	"github.com/glebarez/sqlite"
 	"github.com/redis/go-redis/v9"
@@ -64,6 +66,9 @@ func Open(ctx context.Context, cfg config.Config, log *slog.Logger) (*gorm.DB, *
 	if err := Seed(ctx, db, cfg); err != nil {
 		return nil, nil, err
 	}
+	if err := reconcileGateExecutionLocks(ctx, db); err != nil {
+		return nil, nil, err
+	}
 	var redisClient *redis.Client
 	if cfg.RedisAddr != "" {
 		redisClient = redis.NewClient(&redis.Options{Addr: cfg.RedisAddr, Password: cfg.RedisPassword})
@@ -82,7 +87,57 @@ func migrate(db *gorm.DB) error {
 		&model.OperationDirective{},
 		&model.DirectiveApproval{},
 		&model.ExecutionConfirmation{},
+		&model.GateExecutionLock{},
 	)
+}
+
+// reconcileGateExecutionLocks ensures every directive already in execution
+// holds a gate execution right after upgrading an existing database. It is
+// idempotent: directives that already own a lock are skipped, and a gate whose
+// right is already held by another intervention cannot be double-booked (the
+// insert conflicts and is ignored) so reconciliation never fabricates rights.
+func reconcileGateExecutionLocks(ctx context.Context, db *gorm.DB) error {
+	var directives []model.OperationDirective
+	if err := db.WithContext(ctx).
+		Where("status = ?", string(constants.DirectiveStateExecuting)).
+		Find(&directives).Error; err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	for _, directive := range directives {
+		var existing int64
+		if err := db.WithContext(ctx).Model(&model.GateExecutionLock{}).
+			Where("directive_id = ?", directive.ID).Count(&existing).Error; err != nil {
+			return err
+		}
+		if existing > 0 {
+			continue
+		}
+		gate, err := lookupGateByCode(ctx, db, directive.RelatedCode)
+		if err != nil {
+			continue
+		}
+		lock := model.GateExecutionLock{
+			GateID: gate.ID, GateCode: gate.Code, DirectiveID: directive.ID, DirectiveCode: directive.Code,
+			AcquiredBy: fallbackActor(directive.ApprovedBy), RequestID: "migration-execution-lock-backfill", AcquiredAt: now,
+		}
+		// Ignore a gate-level unique conflict: that gate is genuinely occupied.
+		_ = db.WithContext(ctx).Create(&lock).Error
+	}
+	return nil
+}
+
+func lookupGateByCode(ctx context.Context, db *gorm.DB, code string) (model.GateUnit, error) {
+	var gate model.GateUnit
+	err := db.WithContext(ctx).Where("code = ?", code).First(&gate).Error
+	return gate, err
+}
+
+func fallbackActor(actor string) string {
+	if strings.TrimSpace(actor) == "" {
+		return "system"
+	}
+	return actor
 }
 
 func Seed(ctx context.Context, db *gorm.DB, cfg config.Config) error {

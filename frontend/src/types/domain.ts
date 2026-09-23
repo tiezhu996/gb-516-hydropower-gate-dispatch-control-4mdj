@@ -1,4 +1,15 @@
 
+export interface GateExecutionLock {
+	id: number;
+	gateId: number;
+	gateCode: string;
+	directiveId: number;
+	directiveCode: string;
+	acquiredBy: string;
+	requestId: string;
+	acquiredAt: string;
+}
+
 export interface DomainRecord {
   id: number;
   code: string;
@@ -23,6 +34,7 @@ export interface DomainRecord {
 	confirmedBy?: string;
 	confirmedAt?: string;
 	approvals?: DirectiveApproval[];
+	executionLock?: GateExecutionLock | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -41,7 +53,7 @@ export interface DirectiveApproval {
 }
 
 export interface PageMeta { page: number; pageSize: number; total: number }
-export interface ApiEnvelope<T> { data: T; error?: string; message?: string; meta?: PageMeta }
+export interface ApiEnvelope<T> { data: T; error?: string; message?: string; meta?: PageMeta; details?: { gateCode?: string; occupiedByDirective?: string } }
 export interface UserSession { token: string; username: string; displayName: string; role: string; expiresIn: number; expiresAt: number }
 export interface SessionResponse { username: string; displayName: string; role: string; requestId: string }
 export interface AuditLog {

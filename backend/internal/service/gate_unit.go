@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/blueship581/hydropower-gate-dispatch-control/backend/internal/dto"
 	"github.com/blueship581/hydropower-gate-dispatch-control/backend/internal/model"
 	"github.com/blueship581/hydropower-gate-dispatch-control/backend/internal/repository"
+	"gorm.io/gorm"
 )
 
 type GateUnitService interface {
@@ -25,19 +27,49 @@ type GateUnitService interface {
 type gateUnitService struct {
 	repository repository.GateUnitRepository
 	reservoirs repository.ReservoirRepository
+	locks      repository.GateExecutionLockRepository
 	security   SecurityService
 }
 
-func NewGateUnitService(repo repository.GateUnitRepository, reservoirs repository.ReservoirRepository, security SecurityService) GateUnitService {
-	return &gateUnitService{repository: repo, reservoirs: reservoirs, security: security}
+func NewGateUnitService(repo repository.GateUnitRepository, reservoirs repository.ReservoirRepository, locks repository.GateExecutionLockRepository, security SecurityService) GateUnitService {
+	return &gateUnitService{repository: repo, reservoirs: reservoirs, locks: locks, security: security}
 }
 
 func (s *gateUnitService) List(ctx context.Context, query dto.PageQuery) (repository.Page[model.GateUnit], error) {
-	return s.repository.List(ctx, query)
+	page, err := s.repository.List(ctx, query)
+	if err != nil {
+		return page, err
+	}
+	ids := make([]uint, 0, len(page.Items))
+	for index := range page.Items {
+		ids = append(ids, page.Items[index].ID)
+	}
+	locks, err := s.locks.ActiveByGateIDs(ctx, ids)
+	if err != nil {
+		return repository.Page[model.GateUnit]{}, err
+	}
+	for index := range page.Items {
+		if lock, ok := locks[page.Items[index].ID]; ok {
+			lockCopy := lock
+			page.Items[index].ExecutionLock = &lockCopy
+		}
+	}
+	return page, nil
 }
 
 func (s *gateUnitService) Get(ctx context.Context, id uint) (model.GateUnit, error) {
-	return s.repository.Get(ctx, id)
+	item, err := s.repository.Get(ctx, id)
+	if err != nil {
+		return model.GateUnit{}, err
+	}
+	lock, err := s.locks.ActiveByGateID(ctx, id)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return model.GateUnit{}, err
+	}
+	if err == nil {
+		item.ExecutionLock = &lock
+	}
+	return item, nil
 }
 
 func (s *gateUnitService) Create(ctx context.Context, input dto.CreateGateUnit, actor, requestID string) (model.GateUnit, error) {

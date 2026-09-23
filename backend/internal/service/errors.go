@@ -11,3 +11,21 @@ var (
 	ErrUnauthorized      = errors.New("invalid username or password")
 	ErrInactiveUser      = errors.New("user account is inactive")
 )
+
+// GateOccupiedError reports that a gate's execution right is already held by
+// another running directive. The loser keeps its previous state, and callers
+// surface OccupiedDirectiveCode back to the field team.
+type GateOccupiedError struct {
+	GateCode              string
+	OccupiedDirectiveCode string
+}
+
+func (e *GateOccupiedError) Error() string {
+	return "gate execution right is held by directive " + e.OccupiedDirectiveCode
+}
+
+// Is treats two occupied errors as equivalent so errors.Is(err, &GateOccupiedError{}) works.
+func (e *GateOccupiedError) Is(target error) bool {
+	_, ok := target.(*GateOccupiedError)
+	return ok
+}

@@ -12,6 +12,13 @@ import (
 )
 
 func handleError(c *gin.Context, err error) {
+	var occupied *service.GateOccupiedError
+	if errors.As(err, &occupied) {
+		util.FailWithDetails(c, http.StatusConflict, "gate_occupied", err.Error(), gin.H{
+			"gateCode": occupied.GateCode, "occupiedByDirective": occupied.OccupiedDirectiveCode,
+		})
+		return
+	}
 	switch {
 	case errors.Is(err, gorm.ErrRecordNotFound):
 		util.Fail(c, http.StatusNotFound, "not_found", "record was not found")

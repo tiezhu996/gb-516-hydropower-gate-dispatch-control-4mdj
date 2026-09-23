@@ -3,6 +3,20 @@ import type { ApiEnvelope, UserSession } from '../types/domain';
 
 const TOKEN_KEY = 'domain-control-session';
 
+export class ApiError extends Error {
+  code: string;
+  details?: ApiEnvelope<unknown>['details'];
+  constructor(code: string, message: string, details?: ApiEnvelope<unknown>['details']) {
+    super(message);
+    this.name = 'ApiError';
+    this.code = code;
+    this.details = details;
+  }
+  get occupiedByDirective(): string | undefined {
+    return this.details?.occupiedByDirective;
+  }
+}
+
 export function getToken(): string {
 	return loadSession()?.token || '';
 }
@@ -31,6 +45,8 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
 	if (response.status === 401) clearSession();
   if (response.status === 204) return { data: undefined as T };
   const payload = await response.json().catch(() => ({ error: 'invalid_response', message: '服务返回了无法解析的响应' }));
-  if (!response.ok) throw new Error(payload.message || payload.error || `HTTP ${response.status}`);
+  if (!response.ok) {
+    throw new ApiError(payload.error || `HTTP ${response.status}`, payload.message || payload.error || `HTTP ${response.status}`, payload.details);
+  }
   return payload as ApiEnvelope<T>;
 }

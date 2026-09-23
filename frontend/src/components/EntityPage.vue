@@ -29,9 +29,9 @@ const highRisk = computed(() => props.store.items.filter((item: DomainRecord) =>
 const canCreate = computed(() => can('operator', 'admin'));
 const pageDescription = computed(() => ({
   reservoir: '监控水位阈值与许可窗口，为调度决策提供约束。',
-  gateUnit: '查看闸门实时状态，所有开闭动作必须经过中间态。',
-  operationDirective: '编排闸门指令，并由不同账号完成提交与安全复核。',
-  executionConfirmation: '记录现场执行结果、证据及关联操作指令。',
+  gateUnit: '查看闸门实时状态与当前占用指令，所有开闭动作必须经过中间态。',
+  operationDirective: '编排闸门指令，执行权锁定在闸门上：设备空闲时已批准指令才能开工。',
+  executionConfirmation: '记录现场执行结果、证据及关联操作指令，完成或失败均自动释放执行权。',
 }[props.config.key] || `管理${props.config.label}状态、风险与责任人。`));
 
 async function load(): Promise<void> {
@@ -117,6 +117,30 @@ function selectTransition(item: DomainRecord, status: string): void {
     : `值班人员确认将状态由 ${item.status} 推进至 ${status}`;
 }
 
+// 指令页：展示本条指令是否持有目标闸门的执行权；执行中未持锁表示锁数据待恢复。
+function directiveLockTagType(row: DomainRecord): 'danger' | 'success' | 'info' {
+  if (row.executionLock) return 'danger';
+  if (row.status === 'executing') return 'info';
+  return 'success';
+}
+
+function directiveLockLabel(row: DomainRecord): string {
+  if (row.executionLock) return `执行中 · 持有 ${row.executionLock.gateCode} 执行权`;
+  if (row.status === 'approved') return '已批准 · 闸门空闲时可开工';
+  if (['draft', 'pending'].includes(row.status)) return '未开工';
+  if (row.status === 'executing') return '执行中';
+  return '执行权已释放';
+}
+
+// 闸门页：展示当前占用本闸门执行权的指令，空闲时允许下一条已批准指令开工。
+function gateLockTagType(row: DomainRecord): 'danger' | 'success' {
+  return row.executionLock ? 'danger' : 'success';
+}
+
+function gateLockLabel(row: DomainRecord): string {
+  return row.executionLock ? `占用中 · ${row.executionLock.directiveCode}` : '执行权空闲';
+}
+
 async function confirmTransition(): Promise<void> {
   if (!pending.value || transitionReason.value.trim().length < 3) return;
   await props.store.transition(props.config.path, pending.value.item, pending.value.status, transitionReason.value.trim());
@@ -162,8 +186,18 @@ async function confirmTransition(): Promise<void> {
             <StatusBadge v-else :status="row.status" />
           </template>
         </el-table-column>
+        <el-table-column v-if="config.key === 'gateUnit'" label="执行权" width="170">
+          <template #default="{ row }">
+            <el-tag :type="gateLockTagType(row)" size="small" effect="plain">{{ gateLockLabel(row) }}</el-tag>
+          </template>
+        </el-table-column>
 		<el-table-column v-if="config.key === 'operationDirective'" label="目标状态" width="120">
           <template #default="{ row }"><GateStateBadge :state="row.gateState || 'closed'" /></template>
+        </el-table-column>
+        <el-table-column v-if="config.key === 'operationDirective'" label="执行权 / 执行状态" min-width="215">
+          <template #default="{ row }">
+            <el-tag :type="directiveLockTagType(row)" size="small" effect="plain">{{ directiveLockLabel(row) }}</el-tag>
+          </template>
         </el-table-column>
 		<el-table-column label="风险" width="80"><template #default="{ row }">{{ riskLabel(row.riskLevel) }}</template></el-table-column>
         <el-table-column prop="owner" label="责任人" min-width="110" />

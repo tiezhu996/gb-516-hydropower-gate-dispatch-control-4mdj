@@ -16,6 +16,9 @@ type GateUnit struct {
 	EffectiveAt time.Time `json:"effectiveAt"`
 	Evidence    string    `json:"evidence" gorm:"size:2000"`
 	RelatedCode string    `json:"relatedCode" gorm:"size:64;index"`
+	// ExecutionLock is populated by the service with the directive that
+	// currently holds this gate's execution right; it is not a persisted column.
+	ExecutionLock *GateExecutionLock `json:"executionLock,omitempty" gorm:"-"`
 }
 
 func (item *GateUnit) GetBase() *BaseModel { return &item.BaseModel }

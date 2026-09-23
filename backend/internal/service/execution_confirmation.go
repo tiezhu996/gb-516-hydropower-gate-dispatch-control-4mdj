@@ -26,11 +26,12 @@ type executionConfirmationService struct {
 	repository repository.ExecutionConfirmationRepository
 	directives repository.OperationDirectiveRepository
 	gates      repository.GateUnitRepository
+	locks      repository.GateExecutionLockRepository
 	security   SecurityService
 }
 
-func NewExecutionConfirmationService(repo repository.ExecutionConfirmationRepository, directives repository.OperationDirectiveRepository, gates repository.GateUnitRepository, security SecurityService) ExecutionConfirmationService {
-	return &executionConfirmationService{repository: repo, directives: directives, gates: gates, security: security}
+func NewExecutionConfirmationService(repo repository.ExecutionConfirmationRepository, directives repository.OperationDirectiveRepository, gates repository.GateUnitRepository, locks repository.GateExecutionLockRepository, security SecurityService) ExecutionConfirmationService {
+	return &executionConfirmationService{repository: repo, directives: directives, gates: gates, locks: locks, security: security}
 }
 
 func (s *executionConfirmationService) List(ctx context.Context, query dto.PageQuery) (repository.Page[model.ExecutionConfirmation], error) {
@@ -182,7 +183,7 @@ func (s *executionConfirmationService) Transition(ctx context.Context, id uint, 
 			return err
 		}
 		if gate.Status == gateTarget {
-			return nil
+			return s.releaseExecutionLock(txCtx, directive, gate, actor, requestID, target)
 		}
 		gateBefore := gate.Status
 		gate.Status = gateTarget
@@ -191,11 +192,34 @@ func (s *executionConfirmationService) Transition(ctx context.Context, id uint, 
 		if err := s.gates.Update(txCtx, gate.ID, gate.Version-1, &gate); err != nil {
 			return err
 		}
-		return s.security.Audit(txCtx, actor, requestID, "execution_outcome", "GateUnit", gate.ID, gateBefore, gateTarget, input.Reason)
+		if err := s.security.Audit(txCtx, actor, requestID, "execution_outcome", "GateUnit", gate.ID, gateBefore, gateTarget, input.Reason); err != nil {
+			return err
+		}
+		return s.releaseExecutionLock(txCtx, directive, gate, actor, requestID, target)
 	}); err != nil {
 		return model.ExecutionConfirmation{}, fmt.Errorf("transition 执行确认: %w", err)
 	}
 	return s.repository.Get(ctx, id)
+}
+
+// releaseExecutionLock releases the gate execution right whenever an executing
+// directive reaches its terminal state through a confirmation: a successful
+// receipt (confirmed) or a failed receipt (failed). The delete is idempotent,
+// and releasing is audited so the right never outlives the work it guarded.
+func (s *executionConfirmationService) releaseExecutionLock(ctx context.Context, directive model.OperationDirective, gate model.GateUnit, actor, requestID, confirmationState string) error {
+	released, err := s.locks.ReleaseByDirectiveID(ctx, directive.ID)
+	if err != nil {
+		return err
+	}
+	if !released {
+		return nil
+	}
+	outcome := "完成"
+	if confirmationState == "failed" {
+		outcome = "回执失败"
+	}
+	return s.security.Audit(ctx, actor, requestID, "execution_lock_release", "GateUnit", gate.ID, "locked", "",
+		fmt.Sprintf("指令 %s%s，释放闸门 %s 执行权", directive.Code, outcome, gate.Code))
 }
 
 func (s *executionConfirmationService) Delete(ctx context.Context, id uint, actor, requestID string) error {

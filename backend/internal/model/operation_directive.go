@@ -22,6 +22,9 @@ type OperationDirective struct {
 	ApprovedBy  string              `json:"approvedBy" gorm:"size:80;index"`
 	ApprovedAt  *time.Time          `json:"approvedAt"`
 	Approvals   []DirectiveApproval `json:"approvals" gorm:"foreignKey:DirectiveID;constraint:OnDelete:CASCADE"`
+	// ExecutionLock is populated by the service when this directive currently
+	// holds the execution right of its gate; it is not a persisted column.
+	ExecutionLock *GateExecutionLock `json:"executionLock,omitempty" gorm:"-"`
 }
 
 func (item *OperationDirective) GetBase() *BaseModel { return &item.BaseModel }
