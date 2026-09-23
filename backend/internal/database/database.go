@@ -36,7 +36,7 @@ func Open(ctx context.Context, cfg config.Config, log *slog.Logger) (*gorm.DB, *
 	var db *gorm.DB
 	var err error
 	for attempt := 1; attempt <= 20; attempt++ {
-		db, err = gorm.Open(dialector, &gorm.Config{Logger: logger.Default.LogMode(logLevel)})
+		db, err = gorm.Open(dialector, &gorm.Config{Logger: logger.Default.LogMode(logLevel), TranslateError: true})
 		if err == nil {
 			sqlDB, dbErr := db.DB()
 			if dbErr == nil && sqlDB.PingContext(ctx) == nil {
@@ -75,14 +75,31 @@ func Open(ctx context.Context, cfg config.Config, log *slog.Logger) (*gorm.DB, *
 }
 
 func migrate(db *gorm.DB) error {
-	return db.AutoMigrate(
+	if err := db.AutoMigrate(
 		&model.User{}, &model.AuditLog{},
 		&model.Reservoir{},
 		&model.GateUnit{},
 		&model.OperationDirective{},
 		&model.DirectiveApproval{},
 		&model.ExecutionConfirmation{},
-	)
+	); err != nil {
+		return err
+	}
+	return EnsureDirectiveExecutionLock(db)
+}
+
+// EnsureDirectiveExecutionLock installs the gate execution lock: at most one
+// directive may hold the executing state for a gate at any moment, so two
+// starters racing the same gate cannot both win. The partial unique index is
+// the atomic arbiter; MySQL has no partial indexes and relies on the
+// service-level pre-check instead.
+func EnsureDirectiveExecutionLock(db *gorm.DB) error {
+	switch db.Dialector.Name() {
+	case "postgres", "sqlite":
+		return db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS ux_operation_directives_executing_gate ON operation_directives (related_code) WHERE status = 'executing' AND deleted_at IS NULL`).Error
+	default:
+		return nil
+	}
 }
 
 func Seed(ctx context.Context, db *gorm.DB, cfg config.Config) error {

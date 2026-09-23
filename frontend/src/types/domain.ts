@@ -16,6 +16,7 @@ export interface DomainRecord {
   evidence: string;
 	relatedCode: string;
 	gateState?: 'open' | 'closed' | 'moving' | 'locked';
+	gateOccupier?: string;
 	submittedBy?: string;
 	submittedAt?: string;
 	approvedBy?: string;

@@ -21,6 +21,10 @@ func handleError(c *gin.Context, err error) {
 		util.Fail(c, http.StatusForbidden, "forbidden", err.Error())
 	case errors.Is(err, service.ErrTwoPersonRequired), errors.Is(err, service.ErrImmutableState):
 		util.Fail(c, http.StatusConflict, "safety_rule", err.Error())
+	case errors.Is(err, service.ErrGateOccupied):
+		util.Fail(c, http.StatusConflict, "gate_occupied", err.Error())
+	case errors.Is(err, gorm.ErrDuplicatedKey):
+		util.Fail(c, http.StatusConflict, "duplicate_key", "record conflicts with an existing unique value")
 	case errors.Is(err, service.ErrInvalidTransition), errors.Is(err, service.ErrInvalidInput):
 		util.Fail(c, http.StatusUnprocessableEntity, "business_rule", err.Error())
 	default:

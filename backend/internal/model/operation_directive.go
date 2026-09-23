@@ -21,7 +21,10 @@ type OperationDirective struct {
 	SubmittedAt *time.Time          `json:"submittedAt"`
 	ApprovedBy  string              `json:"approvedBy" gorm:"size:80;index"`
 	ApprovedAt  *time.Time          `json:"approvedAt"`
-	Approvals   []DirectiveApproval `json:"approvals" gorm:"foreignKey:DirectiveID;constraint:OnDelete:CASCADE"`
+	// GateOccupier is the code of the directive currently holding the
+	// execution right on the linked gate. Derived on read, never persisted.
+	GateOccupier string              `json:"gateOccupier" gorm:"-"`
+	Approvals    []DirectiveApproval `json:"approvals" gorm:"foreignKey:DirectiveID;constraint:OnDelete:CASCADE"`
 }
 
 func (item *OperationDirective) GetBase() *BaseModel { return &item.BaseModel }

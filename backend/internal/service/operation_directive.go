@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/blueship581/hydropower-gate-dispatch-control/backend/internal/dto"
 	"github.com/blueship581/hydropower-gate-dispatch-control/backend/internal/model"
 	"github.com/blueship581/hydropower-gate-dispatch-control/backend/internal/repository"
+	"gorm.io/gorm"
 )
 
 type OperationDirectiveService interface {
@@ -147,6 +149,15 @@ func (s *operationDirectiveService) Transition(ctx context.Context, id uint, inp
 		if target == string(constants.DirectiveStateExecuting) && linkedGate.Status == string(constants.GateStateLocked) {
 			return model.OperationDirective{}, fmt.Errorf("%w: locked gate cannot execute a directive", ErrInvalidInput)
 		}
+		if target == string(constants.DirectiveStateExecuting) {
+			occupant, occupyErr := s.repository.FindExecutingByGate(ctx, current.RelatedCode)
+			switch {
+			case occupyErr == nil:
+				return model.OperationDirective{}, fmt.Errorf("%w: gate %s is executing directive %s", ErrGateOccupied, linkedGate.Code, occupant.Code)
+			case !errors.Is(occupyErr, gorm.ErrRecordNotFound):
+				return model.OperationDirective{}, fmt.Errorf("check gate execution lock: %w", occupyErr)
+			}
+		}
 		gate = &linkedGate
 		if target == string(constants.DirectiveStateAborted) {
 			gateTarget = string(constants.GateStateLocked)
@@ -198,6 +209,13 @@ func (s *operationDirectiveService) Transition(ctx context.Context, id uint, inp
 		}
 		return s.security.Audit(txCtx, actor, requestID, "directive_execution", "GateUnit", gate.ID, gateBefore, gateTarget, input.Reason)
 	}); err != nil {
+		if target == string(constants.DirectiveStateExecuting) && errors.Is(err, gorm.ErrDuplicatedKey) {
+			// A concurrent starter won the gate execution lock between the
+			// pre-check and commit; name the occupant and keep our state.
+			if occupant, lookupErr := s.repository.FindExecutingByGate(ctx, current.RelatedCode); lookupErr == nil {
+				return model.OperationDirective{}, fmt.Errorf("%w: gate %s is executing directive %s", ErrGateOccupied, current.RelatedCode, occupant.Code)
+			}
+		}
 		return model.OperationDirective{}, fmt.Errorf("transition 操作指令: %w", err)
 	}
 	return s.repository.Get(ctx, id)

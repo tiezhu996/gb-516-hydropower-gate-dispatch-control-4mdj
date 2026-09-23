@@ -165,6 +165,15 @@ async function confirmTransition(): Promise<void> {
 		<el-table-column v-if="config.key === 'operationDirective'" label="目标状态" width="120">
           <template #default="{ row }"><GateStateBadge :state="row.gateState || 'closed'" /></template>
         </el-table-column>
+		<el-table-column v-if="config.key === 'operationDirective'" label="执行占用" min-width="140">
+          <template #default="{ row }">
+            <template v-if="row.gateOccupier">
+              <strong>{{ row.gateOccupier }}</strong>
+              <StatusBadge status="executing" />
+            </template>
+            <span v-else class="muted">闸门空闲</span>
+          </template>
+        </el-table-column>
 		<el-table-column label="风险" width="80"><template #default="{ row }">{{ riskLabel(row.riskLevel) }}</template></el-table-column>
         <el-table-column prop="owner" label="责任人" min-width="110" />
 		<el-table-column v-if="['gateUnit', 'operationDirective', 'executionConfirmation'].includes(config.key)" prop="relatedCode" :label="relationLabel" width="130" />
