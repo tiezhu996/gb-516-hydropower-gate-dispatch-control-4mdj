@@ -1,0 +1,12 @@
+
+.env
+.DS_Store
+*.log
+*.db
+backend/bin/
+frontend/node_modules/
+frontend/dist/
+*.tsbuildinfo
+.idea/
+.vscode/
+validation-output/

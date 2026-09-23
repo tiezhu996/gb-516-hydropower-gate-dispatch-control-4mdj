@@ -1,0 +1,93 @@
+
+name: hydropower-gate-dispatch-control
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: ${COMPOSE_PROJECT_NAME:-hydropower-gate-dispatch-control}-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "${DB_PORT:-20516}:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 4s
+      retries: 25
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: ${COMPOSE_PROJECT_NAME:-hydropower-gate-dispatch-control}-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "${REDIS_PORT:-21516}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ${COMPOSE_PROJECT_NAME:-hydropower-gate-dispatch-control}-backend
+    restart: unless-stopped
+    environment:
+      APP_NAME: hydropower-gate-dispatch-control
+      APP_ENV: ${APP_ENV:-development}
+      PORT: 8080
+      DATABASE_DRIVER: postgres
+      DATABASE_DSN: "host=db user=${DB_USER} password=${DB_PASSWORD} dbname=${DB_NAME} port=5432 sslmode=disable TimeZone=Asia/Shanghai"
+      REDIS_ADDR: redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      TOKEN_TTL: 8h
+      REQUEST_LIMIT: 240
+      LOGIN_REQUEST_LIMIT: ${LOGIN_REQUEST_LIMIT:-8}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-Admin123!}
+      BOOTSTRAP_OPERATOR_PASSWORD: ${BOOTSTRAP_OPERATOR_PASSWORD:-Admin123!}
+      BOOTSTRAP_REVIEWER_PASSWORD: ${BOOTSTRAP_REVIEWER_PASSWORD:-Admin123!}
+
+    ports:
+      - "${BACKEND_PORT:-19516}:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 5s
+      timeout: 4s
+      retries: 25
+      start_period: 8s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ${COMPOSE_PROJECT_NAME:-hydropower-gate-dispatch-control}-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-18516}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
+      interval: 5s
+      timeout: 4s
+      retries: 20
+
+volumes:
+  db_data:
+  redis_data:

@@ -1,0 +1,17 @@
+{
+  "mode": "service",
+  "start": "go run ./cmd/server",
+  "workdir": "backend",
+  "env": {
+    "PORT": "17516",
+    "DATABASE_DRIVER": "sqlite",
+    "DATABASE_DSN": "/tmp/hydropower-gate-dispatch-control-smoke.db",
+    "REDIS_ADDR": "",
+    "JWT_SECRET": "runtime-smoke-secret-change-me"
+  },
+  "ready_url": "http://127.0.0.1:17516/healthz",
+  "ready_status": [
+    200
+  ],
+  "startup_timeout": 45
+}
